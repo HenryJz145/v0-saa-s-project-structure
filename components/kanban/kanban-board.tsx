@@ -8,32 +8,43 @@ import { CreateTaskDialog } from './create-task-dialog'
 import { TaskDetailSheet } from './task-detail-sheet'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
-import { Plus, Filter } from 'lucide-react'
-import type { Task, BoardColumn, Label, Profile, WorkspaceMember } from '@/lib/types/database'
+import { Filter } from 'lucide-react'
+import type { Task, BoardList, Tag, WorkspaceMembershipWithProfile, TaskStatus } from '@/lib/types/database'
 
 interface KanbanBoardProps {
   projectId: string
   boardId: string
-  columns: (BoardColumn & { tasks: Task[] })[]
-  labels: Label[]
-  members: (WorkspaceMember & { profile: Profile })[]
-  workspaceSlug: string
-  projectSlug: string
+  boardLists: (BoardList & { tasks: Task[] })[]
+  tags: Tag[]
+  members: WorkspaceMembershipWithProfile[]
+  workspaceId: string
+}
+
+// Map board list names to task status
+const statusMap: Record<string, TaskStatus> = {
+  'Backlog': 'backlog',
+  'Pending': 'pending',
+  'To Do': 'pending',
+  'In Progress': 'ongoing',
+  'Ongoing': 'ongoing',
+  'In Review': 'ongoing',
+  'Done': 'complete',
+  'Complete': 'complete',
+  'Archived': 'archived',
 }
 
 export function KanbanBoard({
   projectId,
   boardId,
-  columns,
-  labels,
+  boardLists,
+  tags,
   members,
-  workspaceSlug,
-  projectSlug,
+  workspaceId,
 }: KanbanBoardProps) {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [isTaskSheetOpen, setIsTaskSheetOpen] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
-  const [createColumnId, setCreateColumnId] = useState<string | null>(null)
+  const [createListId, setCreateListId] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const router = useRouter()
 
@@ -42,14 +53,14 @@ export function KanbanBoard({
     setIsTaskSheetOpen(true)
   }, [])
 
-  const handleCreateTask = useCallback((columnId: string) => {
-    setCreateColumnId(columnId)
+  const handleCreateTask = useCallback((listId: string) => {
+    setCreateListId(listId)
     setIsCreating(true)
   }, [])
 
   const handleDragStart = useCallback((e: React.DragEvent, task: Task) => {
     e.dataTransfer.setData('taskId', task.id)
-    e.dataTransfer.setData('sourceColumnId', task.column_id || '')
+    e.dataTransfer.setData('sourceListId', task.board_list_id || '')
     setIsDragging(true)
   }, [])
 
@@ -57,33 +68,38 @@ export function KanbanBoard({
     setIsDragging(false)
   }, [])
 
-  const handleDrop = useCallback(async (e: React.DragEvent, targetColumnId: string) => {
+  const handleDrop = useCallback(async (e: React.DragEvent, targetListId: string) => {
     e.preventDefault()
     const taskId = e.dataTransfer.getData('taskId')
-    const sourceColumnId = e.dataTransfer.getData('sourceColumnId')
+    const sourceListId = e.dataTransfer.getData('sourceListId')
 
-    if (sourceColumnId === targetColumnId) return
+    if (sourceListId === targetListId) return
 
     const supabase = createClient()
 
-    // Get the column's status mapping
-    const targetColumn = columns.find(c => c.id === targetColumnId)
-    const statusMap: Record<string, string> = {
-      'Backlog': 'backlog',
-      'To Do': 'todo',
-      'In Progress': 'in_progress',
-      'In Review': 'in_review',
-      'Done': 'done',
+    // Get the target list to determine new status
+    const targetList = boardLists.find(l => l.id === targetListId)
+    const newStatus = statusMap[targetList?.name || ''] || 'pending'
+
+    const updateData: {
+      board_list_id: string
+      status: TaskStatus
+      completed_at?: string | null
+      started_at?: string | null
+    } = {
+      board_list_id: targetListId,
+      status: newStatus,
+      completed_at: newStatus === 'complete' ? new Date().toISOString() : null,
     }
-    const newStatus = statusMap[targetColumn?.name || ''] || 'todo'
+
+    // Set started_at when moving to ongoing
+    if (newStatus === 'ongoing') {
+      updateData.started_at = new Date().toISOString()
+    }
 
     const { error } = await supabase
       .from('tasks')
-      .update({
-        column_id: targetColumnId,
-        status: newStatus,
-        completed_at: newStatus === 'done' ? new Date().toISOString() : null,
-      })
+      .update(updateData)
       .eq('id', taskId)
 
     if (error) {
@@ -92,7 +108,7 @@ export function KanbanBoard({
     }
 
     router.refresh()
-  }, [columns, router])
+  }, [boardLists, router])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -110,25 +126,26 @@ export function KanbanBoard({
         <CreateTaskDialog
           projectId={projectId}
           boardId={boardId}
-          columnId={columns[0]?.id}
-          labels={labels}
+          boardListId={boardLists[0]?.id}
+          tags={tags}
           members={members}
+          workspaceId={workspaceId}
           onSuccess={() => router.refresh()}
         />
       </div>
 
       <div className="flex-1 overflow-x-auto p-4">
         <div className="flex gap-4 h-full min-w-max">
-          {columns.map((column) => (
+          {boardLists.map((list) => (
             <KanbanColumn
-              key={column.id}
-              column={column}
-              tasks={column.tasks || []}
+              key={list.id}
+              boardList={list}
+              tasks={list.tasks || []}
               onTaskClick={handleTaskClick}
-              onCreateTask={() => handleCreateTask(column.id)}
+              onCreateTask={() => handleCreateTask(list.id)}
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
-              onDrop={(e) => handleDrop(e, column.id)}
+              onDrop={(e) => handleDrop(e, list.id)}
               onDragOver={handleDragOver}
               isDragging={isDragging}
             />
@@ -140,8 +157,9 @@ export function KanbanBoard({
         task={selectedTask}
         open={isTaskSheetOpen}
         onOpenChange={setIsTaskSheetOpen}
-        labels={labels}
+        tags={tags}
         members={members}
+        workspaceId={workspaceId}
         onUpdate={() => {
           router.refresh()
         }}
@@ -150,14 +168,15 @@ export function KanbanBoard({
       <CreateTaskDialog
         projectId={projectId}
         boardId={boardId}
-        columnId={createColumnId || columns[0]?.id}
-        labels={labels}
+        boardListId={createListId || boardLists[0]?.id}
+        tags={tags}
         members={members}
+        workspaceId={workspaceId}
         open={isCreating}
         onOpenChange={setIsCreating}
         onSuccess={() => {
           setIsCreating(false)
-          setCreateColumnId(null)
+          setCreateListId(null)
           router.refresh()
         }}
       />

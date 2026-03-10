@@ -1,109 +1,130 @@
-export type WorkspaceRole = 'owner' | 'admin' | 'member' | 'viewer'
-export type ProjectStatus = 'active' | 'on_hold' | 'completed' | 'archived'
-export type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done' | 'cancelled'
-export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent'
-export type SubscriptionTier = 'free' | 'pro' | 'business' | 'enterprise'
-export type SubscriptionStatus = 'active' | 'cancelled' | 'past_due' | 'trialing'
+// Enums matching database schema
+export type WorkspaceRole = 'owner' | 'admin' | 'member'
+export type MembershipStatus = 'invited' | 'active' | 'removed'
+export type ProjectStatus = 'active' | 'archived' | 'deleted'
+export type BoardType = 'kanban' | 'list' | 'gantt'
+export type BoardStatus = 'active' | 'archived'
+export type TaskStatus = 'pending' | 'backlog' | 'ongoing' | 'complete' | 'archived'
+export type SubscriptionPlan = 'free' | 'pro'
+export type SubscriptionStatus = 'active' | 'canceled' | 'past_due'
+export type RenewalPeriod = 'monthly' | 'yearly'
 
+// Profile extends auth.users
 export interface Profile {
   id: string
-  email: string
-  full_name: string | null
+  name: string | null
   avatar_url: string | null
+  phone: string | null
   created_at: string
   updated_at: string
 }
 
+// Workspace
 export interface Workspace {
   id: string
   name: string
-  slug: string
   description: string | null
-  logo_url: string | null
-  owner_id: string
+  created_by: string
   created_at: string
   updated_at: string
 }
 
-export interface WorkspaceMember {
+// Workspace Membership
+export interface WorkspaceMembership {
   id: string
   workspace_id: string
   user_id: string
   role: WorkspaceRole
+  status: MembershipStatus
   invited_by: string | null
-  joined_at: string
+  invite_email: string | null
+  invite_token: string | null
+  joined_at: string | null
+  left_at: string | null
+  created_at: string
   updated_at: string
-  profile?: Profile
 }
 
+// Project
 export interface Project {
   id: string
   workspace_id: string
   name: string
-  slug: string
   description: string | null
   status: ProjectStatus
-  color: string
-  icon: string | null
-  start_date: string | null
-  end_date: string | null
+  performance_metrics: Record<string, unknown> | null
   created_by: string
   created_at: string
   updated_at: string
-  workspace?: Workspace
 }
 
+// Board
 export interface Board {
   id: string
   project_id: string
   name: string
-  description: string | null
-  position: number
+  type: BoardType
+  status: BoardStatus
+  created_by: string
   created_at: string
   updated_at: string
-  columns?: BoardColumn[]
 }
 
-export interface BoardColumn {
+// Board List (columns in Kanban)
+export interface BoardList {
   id: string
   board_id: string
   name: string
-  color: string
   position: number
-  wip_limit: number | null
   created_at: string
   updated_at: string
-  tasks?: Task[]
 }
 
+// Task
 export interface Task {
   id: string
+  board_id: string
+  board_list_id: string | null
   project_id: string
-  board_id: string | null
-  column_id: string | null
   parent_task_id: string | null
   title: string
   description: string | null
   status: TaskStatus
-  priority: TaskPriority
   position: number
+  estimated_time_minutes: number | null
+  actual_time_minutes: number | null
+  performance_score: number | null
   due_date: string | null
-  estimated_hours: number | null
-  actual_hours: number | null
   created_by: string
-  assigned_to: string | null
   created_at: string
   updated_at: string
+  started_at: string | null
   completed_at: string | null
-  assignee?: Profile
-  creator?: Profile
-  labels?: TaskLabel[]
-  comments?: Comment[]
-  attachments?: Attachment[]
-  subtasks?: Task[]
+  archived_at: string | null
 }
 
-export interface Label {
+// Task Assignee
+export interface TaskAssignee {
+  id: string
+  task_id: string
+  user_id: string
+  assigned_by: string | null
+  assigned_at: string
+  unassigned_at: string | null
+}
+
+// Task Comment
+export interface TaskComment {
+  id: string
+  task_id: string
+  user_id: string
+  message: string
+  created_at: string
+  updated_at: string
+}
+
+// Tag (used for labeling tasks)
+export interface Tag {
   id: string
   workspace_id: string
   name: string
@@ -111,80 +132,103 @@ export interface Label {
   created_at: string
 }
 
-export interface TaskLabel {
-  task_id: string
-  label_id: string
-  label?: Label
-}
-
-export interface Comment {
+// Task Tag junction
+export interface TaskTag {
   id: string
   task_id: string
-  user_id: string
-  content: string
+  tag_id: string
   created_at: string
-  updated_at: string
-  user?: Profile
 }
 
+// Attachment
 export interface Attachment {
   id: string
-  task_id: string
+  workspace_id: string
+  project_id: string | null
+  board_id: string | null
+  task_id: string | null
   uploaded_by: string
+  file_url: string
   file_name: string
-  file_size: number
   file_type: string
+  file_size: number
   storage_path: string
   created_at: string
-  uploader?: Profile
+  deleted_at: string | null
 }
 
+// Subscription
 export interface Subscription {
   id: string
+  user_id: string
   workspace_id: string
-  tier: SubscriptionTier
+  plan: SubscriptionPlan
   status: SubscriptionStatus
-  current_period_start: string
-  current_period_end: string
-  cancel_at_period_end: boolean
   stripe_customer_id: string | null
   stripe_subscription_id: string | null
-  created_at: string
-  updated_at: string
+  started_at: string
+  ended_at: string | null
+  renewal_period: RenewalPeriod
+  current_period_end: string | null
 }
 
-export interface ActivityLog {
+// Audit Log
+export interface AuditLog {
   id: string
-  workspace_id: string
   user_id: string
+  workspace_id: string
+  project_id: string | null
+  action: string
   entity_type: string
   entity_id: string
-  action: string
-  metadata: Record<string, unknown> | null
+  details: Record<string, unknown> | null
   created_at: string
-  user?: Profile
 }
 
-// Extended types for UI
+// Extended types for UI with relations
+export interface WorkspaceMembershipWithProfile extends WorkspaceMembership {
+  profile: Profile
+}
+
 export interface WorkspaceWithMembers extends Workspace {
-  members: WorkspaceMember[]
-  subscription?: Subscription
+  memberships: WorkspaceMembershipWithProfile[]
 }
 
-export interface ProjectWithTasks extends Project {
-  tasks: Task[]
-  boards: Board[]
+export interface BoardListWithTasks extends BoardList {
+  tasks: TaskWithRelations[]
 }
 
-export interface BoardWithColumns extends Board {
-  columns: BoardColumn[]
+export interface BoardWithLists extends Board {
+  board_lists: BoardListWithTasks[]
 }
 
 export interface TaskWithRelations extends Task {
-  assignee: Profile | null
+  assignees: (TaskAssignee & { profile: Profile })[]
   creator: Profile
-  labels: (TaskLabel & { label: Label })[]
-  comments: (Comment & { user: Profile })[]
-  attachments: (Attachment & { uploader: Profile })[]
+  tags: (TaskTag & { tag: Tag })[]
+  comments: (TaskComment & { profile: Profile })[]
+  attachments: Attachment[]
   subtasks: Task[]
+}
+
+export interface ProjectWithBoards extends Project {
+  boards: Board[]
+}
+
+// Helper type for user from auth
+export interface AuthUser {
+  id: string
+  email: string
+  user_metadata?: {
+    name?: string
+    avatar_url?: string
+  }
+}
+
+// Combined user type for UI
+export interface User {
+  id: string
+  email: string
+  name: string | null
+  avatar_url: string | null
 }

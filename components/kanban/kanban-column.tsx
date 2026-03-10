@@ -5,10 +5,10 @@ import { Badge } from '@/components/ui/badge'
 import { KanbanCard } from './kanban-card'
 import { Plus, MoreHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { Task, BoardColumn } from '@/lib/types/database'
+import type { Task, BoardList } from '@/lib/types/database'
 
 interface KanbanColumnProps {
-  column: BoardColumn
+  boardList: BoardList
   tasks: Task[]
   onTaskClick: (task: Task) => void
   onCreateTask: () => void
@@ -19,8 +19,20 @@ interface KanbanColumnProps {
   isDragging: boolean
 }
 
+const listColorMap: Record<string, string> = {
+  'Backlog': '#6b7280',
+  'Pending': '#eab308',
+  'To Do': '#eab308',
+  'In Progress': '#3b82f6',
+  'Ongoing': '#3b82f6',
+  'In Review': '#a855f7',
+  'Done': '#22c55e',
+  'Complete': '#22c55e',
+  'Archived': '#6b7280',
+}
+
 export function KanbanColumn({
-  column,
+  boardList,
   tasks,
   onTaskClick,
   onCreateTask,
@@ -32,6 +44,7 @@ export function KanbanColumn({
 }: KanbanColumnProps) {
   // Sort tasks by position
   const sortedTasks = [...tasks].sort((a, b) => a.position - b.position)
+  const color = listColorMap[boardList.name] || '#6b7280'
 
   return (
     <div
@@ -46,9 +59,9 @@ export function KanbanColumn({
         <div className="flex items-center gap-2">
           <div
             className="h-3 w-3 rounded-full"
-            style={{ backgroundColor: column.color }}
+            style={{ backgroundColor: color }}
           />
-          <h3 className="font-medium text-sm">{column.name}</h3>
+          <h3 className="font-medium text-sm">{boardList.name}</h3>
           <Badge variant="secondary" className="text-xs">
             {tasks.length}
           </Badge>

@@ -3,34 +3,35 @@
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Calendar, MessageSquare, Paperclip } from 'lucide-react'
+import { Calendar, MessageSquare, Paperclip, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { Task } from '@/lib/types/database'
+import type { Task, TaskWithRelations, TaskStatus } from '@/lib/types/database'
 
 interface KanbanCardProps {
-  task: Task
+  task: Task | TaskWithRelations
   onClick: () => void
   onDragStart: (e: React.DragEvent) => void
   onDragEnd: () => void
 }
 
-export function KanbanCard({ task, onClick, onDragStart, onDragEnd }: KanbanCardProps) {
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'urgent':
-        return 'bg-red-500'
-      case 'high':
-        return 'bg-orange-500'
-      case 'medium':
-        return 'bg-yellow-500'
-      case 'low':
-        return 'bg-green-500'
-      default:
-        return 'bg-muted'
-    }
-  }
+// Status color mapping
+const statusColorMap: Record<TaskStatus, string> = {
+  'pending': 'bg-yellow-500',
+  'backlog': 'bg-muted-foreground',
+  'ongoing': 'bg-blue-500',
+  'complete': 'bg-green-500',
+  'archived': 'bg-muted-foreground/50',
+}
 
-  const isOverdue = task.due_date && new Date(task.due_date) < new Date() && task.status !== 'done'
+export function KanbanCard({ task, onClick, onDragStart, onDragEnd }: KanbanCardProps) {
+  const isOverdue = task.due_date && new Date(task.due_date) < new Date() && task.status !== 'complete'
+  
+  // Check if task has relations
+  const taskWithRelations = task as TaskWithRelations
+  const hasAssignees = taskWithRelations.assignees && taskWithRelations.assignees.length > 0
+  const hasTags = taskWithRelations.tags && taskWithRelations.tags.length > 0
+  const hasComments = taskWithRelations.comments && taskWithRelations.comments.length > 0
+  const hasAttachments = taskWithRelations.attachments && taskWithRelations.attachments.length > 0
 
   return (
     <Card
@@ -43,29 +44,29 @@ export function KanbanCard({ task, onClick, onDragStart, onDragEnd }: KanbanCard
       onDragEnd={onDragEnd}
       onClick={onClick}
     >
-      {/* Priority indicator */}
+      {/* Status indicator and tags */}
       <div className="flex items-center gap-2 mb-2">
-        <div className={cn('h-1.5 w-1.5 rounded-full', getPriorityColor(task.priority))} />
-        {task.labels && task.labels.length > 0 && (
+        <div className={cn('h-1.5 w-1.5 rounded-full', statusColorMap[task.status])} />
+        {hasTags && (
           <div className="flex gap-1 flex-wrap">
-            {task.labels.slice(0, 3).map((tl: { label?: { id: string; name: string; color: string } }) => (
-              tl.label && (
+            {taskWithRelations.tags.slice(0, 3).map((tt) => (
+              tt.tag && (
                 <Badge
-                  key={tl.label.id}
+                  key={tt.tag.id}
                   variant="secondary"
                   className="text-[10px] px-1.5 py-0"
                   style={{
-                    backgroundColor: `${tl.label.color}20`,
-                    color: tl.label.color,
+                    backgroundColor: `${tt.tag.color}20`,
+                    color: tt.tag.color,
                   }}
                 >
-                  {tl.label.name}
+                  {tt.tag.name}
                 </Badge>
               )
             ))}
-            {task.labels.length > 3 && (
+            {taskWithRelations.tags.length > 3 && (
               <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                +{task.labels.length - 3}
+                +{taskWithRelations.tags.length - 3}
               </Badge>
             )}
           </div>
@@ -80,6 +81,27 @@ export function KanbanCard({ task, onClick, onDragStart, onDragEnd }: KanbanCard
         <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
           {task.description}
         </p>
+      )}
+
+      {/* Time tracking info */}
+      {(task.estimated_time_minutes || task.actual_time_minutes) && (
+        <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+          <Clock className="h-3 w-3" />
+          {task.actual_time_minutes ? (
+            <span>
+              {Math.floor(task.actual_time_minutes / 60)}h {task.actual_time_minutes % 60}m
+              {task.estimated_time_minutes && (
+                <span className="text-muted-foreground/70">
+                  {' '}/ {Math.floor(task.estimated_time_minutes / 60)}h est
+                </span>
+              )}
+            </span>
+          ) : (
+            task.estimated_time_minutes && (
+              <span>{Math.floor(task.estimated_time_minutes / 60)}h {task.estimated_time_minutes % 60}m est</span>
+            )
+          )}
+        </div>
       )}
 
       {/* Footer */}
@@ -97,28 +119,37 @@ export function KanbanCard({ task, onClick, onDragStart, onDragEnd }: KanbanCard
               })}
             </div>
           )}
-          {task.comments && task.comments.length > 0 && (
+          {hasComments && (
             <div className="flex items-center gap-1 text-xs">
               <MessageSquare className="h-3 w-3" />
-              {task.comments.length}
+              {taskWithRelations.comments.length}
             </div>
           )}
-          {task.attachments && task.attachments.length > 0 && (
+          {hasAttachments && (
             <div className="flex items-center gap-1 text-xs">
               <Paperclip className="h-3 w-3" />
-              {task.attachments.length}
+              {taskWithRelations.attachments.length}
             </div>
           )}
         </div>
 
-        {task.assignee && (
-          <Avatar className="h-6 w-6">
-            <AvatarImage src={task.assignee.avatar_url || undefined} />
-            <AvatarFallback className="text-[10px]">
-              {task.assignee.full_name?.[0]?.toUpperCase() ||
-               task.assignee.email?.[0]?.toUpperCase() || '?'}
-            </AvatarFallback>
-          </Avatar>
+        {/* Assignees */}
+        {hasAssignees && (
+          <div className="flex -space-x-1">
+            {taskWithRelations.assignees.slice(0, 3).map((assignee) => (
+              <Avatar key={assignee.id} className="h-6 w-6 border-2 border-background">
+                <AvatarImage src={assignee.profile?.avatar_url || undefined} />
+                <AvatarFallback className="text-[10px]">
+                  {assignee.profile?.name?.[0]?.toUpperCase() || '?'}
+                </AvatarFallback>
+              </Avatar>
+            ))}
+            {taskWithRelations.assignees.length > 3 && (
+              <div className="h-6 w-6 rounded-full bg-muted flex items-center justify-center text-[10px] border-2 border-background">
+                +{taskWithRelations.assignees.length - 3}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </Card>

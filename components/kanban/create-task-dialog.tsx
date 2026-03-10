@@ -28,17 +28,18 @@ import { Badge } from '@/components/ui/badge'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { toast } from 'sonner'
-import { Plus, CalendarIcon, X } from 'lucide-react'
+import { Plus, CalendarIcon, X, Clock } from 'lucide-react'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
-import type { Label as LabelType, Profile, WorkspaceMember } from '@/lib/types/database'
+import type { Tag, WorkspaceMembershipWithProfile, TaskStatus } from '@/lib/types/database'
 
 interface CreateTaskDialogProps {
   projectId: string
   boardId: string
-  columnId: string
-  labels: LabelType[]
-  members: (WorkspaceMember & { profile: Profile })[]
+  boardListId: string
+  tags: Tag[]
+  members: WorkspaceMembershipWithProfile[]
+  workspaceId: string
   open?: boolean
   onOpenChange?: (open: boolean) => void
   onSuccess?: () => void
@@ -47,9 +48,10 @@ interface CreateTaskDialogProps {
 export function CreateTaskDialog({
   projectId,
   boardId,
-  columnId,
-  labels,
+  boardListId,
+  tags,
   members,
+  workspaceId,
   open,
   onOpenChange,
   onSuccess,
@@ -57,10 +59,12 @@ export function CreateTaskDialog({
   const [internalOpen, setInternalOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [priority, setPriority] = useState('medium')
-  const [assigneeId, setAssigneeId] = useState<string | undefined>()
+  const [status, setStatus] = useState<TaskStatus>('pending')
+  const [assigneeIds, setAssigneeIds] = useState<string[]>([])
   const [dueDate, setDueDate] = useState<Date | undefined>()
-  const [selectedLabels, setSelectedLabels] = useState<string[]>([])
+  const [estimatedHours, setEstimatedHours] = useState('')
+  const [estimatedMinutes, setEstimatedMinutes] = useState('')
+  const [selectedTags, setSelectedTags] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(false)
 
   const isOpen = open !== undefined ? open : internalOpen
@@ -80,11 +84,11 @@ export function CreateTaskDialog({
       return
     }
 
-    // Get max position in column
+    // Get max position in board list
     const { data: existingTasks } = await supabase
       .from('tasks')
       .select('position')
-      .eq('column_id', columnId)
+      .eq('board_list_id', boardListId)
       .order('position', { ascending: false })
       .limit(1)
 
@@ -92,28 +96,22 @@ export function CreateTaskDialog({
       ? existingTasks[0].position + 1 
       : 0
 
-    // Status mapping based on column
-    const statusMap: Record<string, string> = {
-      'backlog': 'backlog',
-      'todo': 'todo',
-      'in_progress': 'in_progress',
-      'in_review': 'in_review',
-      'done': 'done',
-    }
+    // Calculate estimated time in minutes
+    const estimatedTimeMinutes = 
+      (parseInt(estimatedHours || '0') * 60) + parseInt(estimatedMinutes || '0') || null
 
     const { data: task, error } = await supabase
       .from('tasks')
       .insert({
         project_id: projectId,
         board_id: boardId,
-        column_id: columnId,
+        board_list_id: boardListId,
         title: title.trim(),
         description: description.trim() || null,
-        priority,
-        status: 'todo',
+        status,
         position,
-        assigned_to: assigneeId || null,
-        due_date: dueDate?.toISOString() || null,
+        estimated_time_minutes: estimatedTimeMinutes,
+        due_date: dueDate?.toISOString().split('T')[0] || null,
         created_by: user.id,
       })
       .select()
@@ -125,14 +123,37 @@ export function CreateTaskDialog({
       return
     }
 
-    // Add labels
-    if (selectedLabels.length > 0) {
-      await supabase.from('task_labels').insert(
-        selectedLabels.map((labelId) => ({
-          task_id: task.id,
-          label_id: labelId,
-        }))
-      )
+    // Add task assignees
+    if (assigneeIds.length > 0) {
+      const assigneeInserts = assigneeIds.map((userId) => ({
+        task_id: task.id,
+        user_id: userId,
+        assigned_by: user.id,
+      }))
+      
+      const { error: assigneeError } = await supabase
+        .from('task_assignees')
+        .insert(assigneeInserts)
+      
+      if (assigneeError) {
+        console.error('Failed to add assignees:', assigneeError)
+      }
+    }
+
+    // Add task tags
+    if (selectedTags.length > 0) {
+      const tagInserts = selectedTags.map((tagId) => ({
+        task_id: task.id,
+        tag_id: tagId,
+      }))
+      
+      const { error: tagError } = await supabase
+        .from('task_tags')
+        .insert(tagInserts)
+      
+      if (tagError) {
+        console.error('Failed to add tags:', tagError)
+      }
     }
 
     toast.success('Task created successfully!')
@@ -145,17 +166,27 @@ export function CreateTaskDialog({
   const resetForm = () => {
     setTitle('')
     setDescription('')
-    setPriority('medium')
-    setAssigneeId(undefined)
+    setStatus('pending')
+    setAssigneeIds([])
     setDueDate(undefined)
-    setSelectedLabels([])
+    setEstimatedHours('')
+    setEstimatedMinutes('')
+    setSelectedTags([])
   }
 
-  const toggleLabel = (labelId: string) => {
-    setSelectedLabels((prev) =>
-      prev.includes(labelId)
-        ? prev.filter((id) => id !== labelId)
-        : [...prev, labelId]
+  const toggleTag = (tagId: string) => {
+    setSelectedTags((prev) =>
+      prev.includes(tagId)
+        ? prev.filter((id) => id !== tagId)
+        : [...prev, tagId]
+    )
+  }
+
+  const toggleAssignee = (userId: string) => {
+    setAssigneeIds((prev) =>
+      prev.includes(userId)
+        ? prev.filter((id) => id !== userId)
+        : [...prev, userId]
     )
   }
 
@@ -169,7 +200,7 @@ export function CreateTaskDialog({
           </Button>
         </DialogTrigger>
       )}
-      <DialogContent className="sm:max-w-[550px]">
+      <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>Create task</DialogTitle>
@@ -202,34 +233,34 @@ export function CreateTaskDialog({
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Priority</Label>
-                <Select value={priority} onValueChange={setPriority}>
+                <Label>Status</Label>
+                <Select value={status} onValueChange={(v) => setStatus(v as TaskStatus)}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select priority" />
+                    <SelectValue placeholder="Select status" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="low">
-                      <div className="flex items-center gap-2">
-                        <div className="h-2 w-2 rounded-full bg-green-500" />
-                        Low
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="medium">
+                    <SelectItem value="pending">
                       <div className="flex items-center gap-2">
                         <div className="h-2 w-2 rounded-full bg-yellow-500" />
-                        Medium
+                        Pending
                       </div>
                     </SelectItem>
-                    <SelectItem value="high">
+                    <SelectItem value="backlog">
                       <div className="flex items-center gap-2">
-                        <div className="h-2 w-2 rounded-full bg-orange-500" />
-                        High
+                        <div className="h-2 w-2 rounded-full bg-muted-foreground" />
+                        Backlog
                       </div>
                     </SelectItem>
-                    <SelectItem value="urgent">
+                    <SelectItem value="ongoing">
                       <div className="flex items-center gap-2">
-                        <div className="h-2 w-2 rounded-full bg-red-500" />
-                        Urgent
+                        <div className="h-2 w-2 rounded-full bg-blue-500" />
+                        Ongoing
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="complete">
+                      <div className="flex items-center gap-2">
+                        <div className="h-2 w-2 rounded-full bg-green-500" />
+                        Complete
                       </div>
                     </SelectItem>
                   </SelectContent>
@@ -264,49 +295,80 @@ export function CreateTaskDialog({
             </div>
 
             <div className="space-y-2">
-              <Label>Assignee</Label>
-              <Select value={assigneeId} onValueChange={setAssigneeId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Assign to..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="unassigned">Unassigned</SelectItem>
-                  {members.map((member) => (
-                    <SelectItem key={member.user_id} value={member.user_id}>
-                      <div className="flex items-center gap-2">
-                        <Avatar className="h-5 w-5">
-                          <AvatarImage src={member.profile?.avatar_url || undefined} />
-                          <AvatarFallback className="text-[10px]">
-                            {member.profile?.full_name?.[0]?.toUpperCase() ||
-                             member.profile?.email?.[0]?.toUpperCase() || '?'}
-                          </AvatarFallback>
-                        </Avatar>
-                        {member.profile?.full_name || member.profile?.email}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label className="flex items-center gap-2">
+                <Clock className="h-4 w-4" />
+                Estimated time
+              </Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min="0"
+                  placeholder="0"
+                  value={estimatedHours}
+                  onChange={(e) => setEstimatedHours(e.target.value)}
+                  className="w-20"
+                />
+                <span className="text-sm text-muted-foreground">hours</span>
+                <Input
+                  type="number"
+                  min="0"
+                  max="59"
+                  placeholder="0"
+                  value={estimatedMinutes}
+                  onChange={(e) => setEstimatedMinutes(e.target.value)}
+                  className="w-20"
+                />
+                <span className="text-sm text-muted-foreground">minutes</span>
+              </div>
             </div>
 
-            {labels.length > 0 && (
+            <div className="space-y-2">
+              <Label>Assignees</Label>
+              <div className="flex flex-wrap gap-2">
+                {members.map((member) => (
+                  <div
+                    key={member.user_id}
+                    className={cn(
+                      'flex items-center gap-2 px-2 py-1 rounded-md border cursor-pointer transition-colors',
+                      assigneeIds.includes(member.user_id)
+                        ? 'border-primary bg-primary/10'
+                        : 'border-border hover:bg-muted'
+                    )}
+                    onClick={() => toggleAssignee(member.user_id)}
+                  >
+                    <Avatar className="h-5 w-5">
+                      <AvatarImage src={member.profile?.avatar_url || undefined} />
+                      <AvatarFallback className="text-[10px]">
+                        {member.profile?.name?.[0]?.toUpperCase() || '?'}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="text-sm">{member.profile?.name || 'Unknown'}</span>
+                    {assigneeIds.includes(member.user_id) && (
+                      <X className="h-3 w-3" />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {tags.length > 0 && (
               <div className="space-y-2">
-                <Label>Labels</Label>
+                <Label>Tags</Label>
                 <div className="flex flex-wrap gap-2">
-                  {labels.map((label) => (
+                  {tags.map((tag) => (
                     <Badge
-                      key={label.id}
-                      variant={selectedLabels.includes(label.id) ? 'default' : 'outline'}
+                      key={tag.id}
+                      variant={selectedTags.includes(tag.id) ? 'default' : 'outline'}
                       className="cursor-pointer"
                       style={{
-                        backgroundColor: selectedLabels.includes(label.id) ? label.color : 'transparent',
-                        borderColor: label.color,
-                        color: selectedLabels.includes(label.id) ? 'white' : label.color,
+                        backgroundColor: selectedTags.includes(tag.id) ? tag.color : 'transparent',
+                        borderColor: tag.color,
+                        color: selectedTags.includes(tag.id) ? 'white' : tag.color,
                       }}
-                      onClick={() => toggleLabel(label.id)}
+                      onClick={() => toggleTag(tag.id)}
                     >
-                      {label.name}
-                      {selectedLabels.includes(label.id) && (
+                      {tag.name}
+                      {selectedTags.includes(tag.id) && (
                         <X className="ml-1 h-3 w-3" />
                       )}
                     </Badge>
